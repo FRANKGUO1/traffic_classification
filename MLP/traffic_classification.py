@@ -2,8 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
-from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader, TensorDataset
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -14,7 +13,7 @@ import pdb
 
 def train_model(lr):
     # 1. 读取CSV文件
-    file_path = 'MLP/dataset/training_file5.csv'  # 替换为你的CSV文件路径
+    file_path = 'MLP/dataset/training_file8.csv'  # 替换为你的CSV文件路径
     data = pd.read_csv(file_path)
 
     # 2. 提取特征和标签
@@ -59,9 +58,8 @@ def train_model(lr):
 
     # 初始化模型、损失函数和优化器
     input_dim = X_train.shape[1]
-    num_classes = 4  # 假设是4类
+    num_classes = 4  # 分为4类
     
-    # model = Net(input_dim, num_classes)
     model = MLP(input_dim, num_classes)
     criterion = nn.CrossEntropyLoss()  # 交叉熵损失函数，计算损失率
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-5) # 优化器
@@ -74,9 +72,6 @@ def train_model(lr):
     # 训练模型
     num_epochs = 50 # 50批次
     best_val_loss = float('inf')
-
-    # scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=5, min_lr=1e-6)
-    # scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
 
     for epoch in range(num_epochs):
         # 训练阶段
@@ -183,10 +178,3 @@ def train_model(lr):
 
 train_model(0.001)
 
-
-"""
-# 预测新数据
-with torch.no_grad():
-    outputs = model(X_test)
-    _, predicted = torch.max(outputs, 1)
-"""
