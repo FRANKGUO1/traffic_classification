@@ -7,13 +7,11 @@ from torch.utils.data import DataLoader, TensorDataset
 import pandas as pd
 import matplotlib.pyplot as plt
 from model import *
-# 调试
-import pdb
 
 
 def train_model(lr):
     # 1. 读取CSV文件
-    file_path = 'MLP/dataset/training_file8.csv'  # 替换为你的CSV文件路径
+    file_path = 'MLP/dataset/training_file10.csv'  
     data = pd.read_csv(file_path)
 
     # 2. 提取特征和标签
@@ -23,14 +21,12 @@ def train_model(lr):
     # 标签范围要在
     y = y-1
 
-    # 程序暂停，调试数据
-    # pdb.set_trace()
-
     # 标准化
     scaler = StandardScaler()
     X = scaler.fit_transform(X)
 
     # 这里是将数据集第一次划分，(temp)占20%，训练集(train)占80%。random_state=42为设置随机种子。
+    # X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.3, random_state=42)
     X_train, X_temp, y_train, y_temp = train_test_split(X, y, test_size=0.3, random_state=42)
     # 这里是将temp进行第二次划分，验证集和测试集各占一半。
     X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.5, random_state=42)
@@ -53,7 +49,7 @@ def train_model(lr):
 
     # 每个批次的数据量，这里调整batch_size
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
     # 初始化模型、损失函数和优化器
@@ -70,7 +66,7 @@ def train_model(lr):
     val_accuracies = []
 
     # 训练模型
-    num_epochs = 50 # 50批次
+    num_epochs = 40
     best_val_loss = float('inf')
 
     for epoch in range(num_epochs):
@@ -86,9 +82,7 @@ def train_model(lr):
             optimizer.zero_grad()
             outputs = model(X_batch)
             loss = criterion(outputs, y_batch)
-            # 损失率反向传播
             loss.backward()
-            # 优化器优化
             optimizer.step()
 
             running_loss += loss.item() * X_batch.size(0)
@@ -138,6 +132,7 @@ def train_model(lr):
     # 加载最佳模型
     model.load_state_dict(torch.load('best_model.pth'))
 
+    
     # 评估模型
     model.eval()
     correct = 0
@@ -152,6 +147,7 @@ def train_model(lr):
     test_accuracy = correct / total
     print(f'Test Accuracy: {test_accuracy * 100:.2f}%')
     
+        
     # 绘制训练和验证的损失与准确率曲线
     epochs = range(1, num_epochs + 1)
 
@@ -176,5 +172,5 @@ def train_model(lr):
     plt.show()
 
 
-train_model(0.001)
+train_model(0.0005)
 

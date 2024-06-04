@@ -12,7 +12,7 @@ from model import *
 
 def train_model(lr, k=5):
     # 1. 读取CSV文件
-    file_path = 'MLP/dataset/training_file8.csv'  # 替换为你的CSV文件路径
+    file_path = 'MLP/dataset/training_file10.csv'  # 替换为你的CSV文件路径
     data = pd.read_csv(file_path)
 
     # 2. 提取特征和标签
@@ -62,7 +62,7 @@ def train_model(lr, k=5):
         criterion = nn.CrossEntropyLoss()  # 交叉熵损失函数，计算损失率
         optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-5) # 优化器
 
-        num_epochs = 50
+        num_epochs = 40
         best_val_loss = float('inf')
 
         for _ in range(num_epochs):
