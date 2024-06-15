@@ -205,7 +205,8 @@ def main(p4info_path, bmv2_json_path):
     
     p4info_helper = helper.P4InfoHelper(p4info_path)
 
-    try:
+    """
+    
         s1 = bmv2.Bmv2SwitchConnection(
             name="s1",
             address="0.0.0.0:50051",
@@ -227,22 +228,31 @@ def main(p4info_path, bmv2_json_path):
 
         writeIpv4LpmRules(p4info_helper=p4info_helper, sw_id=s1, dst_ip_addr="10.1.1.2", port=1)
         writeIpv4LpmRules(p4info_helper=p4info_helper, sw_id=s1, dst_ip_addr="10.1.2.2", port=2)
-
+    """
+    try:
         sh.setup(
             device_id=1,
-            grpc_addr='localhost:50051',
-            election_id=1, # (high, low)
+            grpc_addr='0.0.0.0:9559',
+            election_id=(0,1), # (high, low)
             config=sh.FwdPipeConfig(p4info_path, bmv2_json_path)
         )
 
-        te = sh.CloneSessionEntry(100)
-        te.add(255, 0)
+        te_clone = sh.CloneSessionEntry(100)
+        te_clone.add(255, 0)
+        te_clone.insert()
+
+        clone_sessions = te_clone.read()
+
+        # 输出 Clone Session entries
+        for session in clone_sessions:
+            print(session)
+              
+
+        # 其它表项
+        te = sh.TableEntry('<table_name>')(action='<action_name>')
+        te.match['<name>'] = '<value>'
+        te.action['<name>'] = '<value>'
         te.insert()
-
-        readTableRules(p4info_helper, s1)
-
-        
-        
         """
         while True:
             packetin = s1.PacketIn()  # Packet in!
