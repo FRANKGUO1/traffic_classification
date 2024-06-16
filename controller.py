@@ -7,7 +7,11 @@ import subprocess
 import os
 from datetime import datetime
 import p4runtime_sh.shell as sh 
-import threading
+from threading import Thread
+from google.protobuf.json_format import MessageToDict
+import base64
+
+from scapy.all import sniff
 
 import argparse
 import sys
@@ -196,7 +200,11 @@ def monitor_five_tuples(p4info_helper, sw_id):
             last_checked_length = current_length
 
 
-  
+def handle_pkt(pkt):
+    print("Controller got a packet")
+    print(pkt)
+
+
 def main(p4info_path, bmv2_json_path):
     # digest_thread = threading.Thread(target=run_digest)
     # 启动线程
@@ -237,6 +245,28 @@ def main(p4info_path, bmv2_json_path):
             config=sh.FwdPipeConfig(p4info_path, bmv2_json_path)
         )
 
+        
+        # 下发ipv4_lpm表项
+        """
+        te = sh.TableEntry('<table_name>')(action='<action_name>')
+        te.match['<name>'] = '<value>'
+        te.action['<name>'] = '<value>'
+        te.insert()
+        """
+        te_ipv4_lpm = sh.TableEntry('ipv4_lpm')(action='ipv4_forward')
+        te_ipv4_lpm.match['hdr.ipv4.dst_addr'] = '10.1.1.2'
+        te_ipv4_lpm.action['port'] = '1'
+        te_ipv4_lpm.match['hdr.ipv4.dst_addr'] = '10.1.2.2'
+        te_ipv4_lpm.action['port'] = '2'
+        te_ipv4_lpm.insert()
+
+        ipv4_lpm_sessions = te_ipv4_lpm.read()
+
+        for session in ipv4_lpm_sessions:
+            print(session)
+
+
+        # 添加mirroring_add 指令
         te_clone = sh.CloneSessionEntry(100)
         te_clone.add(255, 0)
         te_clone.insert()
@@ -247,12 +277,27 @@ def main(p4info_path, bmv2_json_path):
         for session in clone_sessions:
             print(session)
               
+        packet_in = sh.PacketIn()
+        pktlist = []
+        sys.stdout.flush()  # 刷新输出，确保即时显示
+        pkt = packet_in.sniff(timeout=5)
+        for msg in pkt:
+            response_dict = MessageToDict(msg)
 
-        # 其它表项
-        te = sh.TableEntry('<table_name>')(action='<action_name>')
-        te.match['<name>'] = '<value>'
-        te.action['<name>'] = '<value>'
-        te.insert()
+            metadata_values = [entry['value'] for entry in response_dict['packet']['metadata']]
+
+            # 解码 Base64 编码的值
+            decoded_metadata_values = [base64.b64decode(value) for value in metadata_values]
+            sys.stdout.flush() 
+            for idx, value in enumerate(decoded_metadata_values, start=1):
+                # 转换为整数
+                int_value = int.from_bytes(value, byteorder='big')
+                print(f"Metadata {idx} value (as integer):", int_value)
+            
+        print(pktlist)
+        
+        
+        
         """
         while True:
             packetin = s1.PacketIn()  # Packet in!
