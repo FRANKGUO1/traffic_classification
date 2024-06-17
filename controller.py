@@ -44,46 +44,6 @@ packet_features = []
 # 不处理的特定端口号的数据包
 filter_ports = [53, 161, 162, 21, 20, 25, 587, 465, 143, 993, 110, 995]
 
-class DigestController():
-    def __init__(self, sw_name):
-        self.topo = load_topo('topology.json')
-        self.sw_name = sw_name
-        self.thrift_port = self.topo.get_thrift_port(sw_name)
-        self.controller = SimpleSwitchThriftAPI(self.thrift_port)
-
-    def recv_msg_digest(self, msg):
-        topic, device_id, ctx_id, list_id, buffer_id, num = struct.unpack("<iQiiQi", msg[:32])
-
-        # print(num)
-        
-        offset = 13 # 每个消息在消息体的长度，这里为13字节
-        msg = msg[32:]  # 前32字节为头部
-        # num为五元组数量
-        for _ in range(num):
-            src_ip, dst_ip, src_port, dst_port, protocol = struct.unpack("!IIHHB", msg[0:offset]) # 这里已成功获取五元组
-            if (str(ipaddress.IPv4Address(src_ip)), str(ipaddress.IPv4Address(dst_ip)), src_port, dst_port, protocol) not in packet_features:
-                packet_features.append((str(ipaddress.IPv4Address(src_ip)), str(ipaddress.IPv4Address(dst_ip)), src_port, dst_port, protocol))
-            print(packet_features)
-            print("src_ip:", str(ipaddress.IPv4Address(src_ip)), "dst_ip:", str(ipaddress.IPv4Address(dst_ip)), "src_port:", src_port, "dst_port:", dst_port, "protocol:", protocol)
-            msg = msg[offset:]
-
-        self.controller.client.bm_learning_ack_buffer(ctx_id, list_id, buffer_id)
-
-    def run_digest_loop(self):
-        sub = nnpy.Socket(nnpy.AF_SP, nnpy.SUB)
-        print(sub)
-        notifications_socket = self.controller.client.bm_mgmt_get_info().notifications_socket
-        print("connecting to notification sub %s" % notifications_socket)
-        if notifications_socket:
-            sub.connect(notifications_socket)
-        else:
-            sub.connect("ipc:///tmp/bmv2-1-notifications.ipc")
-        sub.setsockopt(nnpy.SUB, nnpy.SUB_SUBSCRIBE, '')
-
-        while True:
-            msg = sub.recv()
-            self.recv_msg_digest(msg)
-
 
 def read_register():
     register_names = ["register_packet_count", "register_len_count"]
@@ -178,17 +138,6 @@ def printGrpcError(e):
     print("[%s:%d]" % (traceback.tb_frame.f_code.co_filename, traceback.tb_lineno))
 
 
-def wait_until_not_empty(lst, check_interval=1):
-    while not lst:
-        print("等待列表填充...")
-        time.sleep(check_interval)
-
-
-# 运行digest，获取五元组信息
-def run_digest():
-    DigestController("s1").run_digest_loop()
-
-
 # 监控 five_tuples 列表并处理新增元素的函数
 def monitor_five_tuples(p4info_helper, sw_id):
     last_checked_length = 0
@@ -198,11 +147,6 @@ def monitor_five_tuples(p4info_helper, sw_id):
             for i in range(last_checked_length, current_length):
                 writeDetectFlowRules(p4info_helper=p4info_helper, sw_id=sw_id, five_tuples=packet_features[i], index=i)
             last_checked_length = current_length
-
-
-def handle_pkt(pkt):
-    print("Controller got a packet")
-    print(pkt)
 
 
 def main(p4info_path, bmv2_json_path):
