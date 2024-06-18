@@ -147,37 +147,6 @@ def monitor_five_tuples(p4info_helper, sw_id):
 
 
 def main(p4info_path, bmv2_json_path):
-    # digest_thread = threading.Thread(target=run_digest)
-    # 启动线程
-    # digest_thread.start()  
-    # DigestController("s1").run_digest_loop()
-    
-    # p4info_helper = helper.P4InfoHelper(p4info_path)
-
-    """
-    
-        s1 = bmv2.Bmv2SwitchConnection(
-            name="s1",
-            address="0.0.0.0:50051",
-            device_id=1,
-            proto_dump_file="p4runtime.log",
-        )
-
-        if s1.MasterArbitrationUpdate() == None:
-            print("Failed to establish the connection")
-
-        s1.SetForwardingPipelineConfig(
-            p4info=p4info_helper.p4info, bmv2_json_file_path=bmv2_json_path
-        )
-        print("Installed P4 Program using SetForwardingPipelineConfig on s1")
-
-        # 建立白名单，一些特定端口的包不处理
-        #for port in filter_ports:
-        #    writeSrcportMatchRules(p4info_helper=p4info_helper, sw_id=s1, port=port)
-
-        writeIpv4LpmRules(p4info_helper=p4info_helper, sw_id=s1, dst_ip_addr="10.1.1.2", port=1)
-        writeIpv4LpmRules(p4info_helper=p4info_helper, sw_id=s1, dst_ip_addr="10.1.2.2", port=2)
-    """
     try:
         sh.setup(
             device_id=1,
@@ -220,8 +189,9 @@ def main(p4info_path, bmv2_json_path):
         for session in clone_sessions:
             print(session)
               
+            
         packet_in = sh.PacketIn()
-        five_tuple_list = set()
+        five_tuple_list = []
         pktlist = []
         sys.stdout.flush()
         
@@ -238,9 +208,9 @@ def main(p4info_path, bmv2_json_path):
 
 
         last_processed_index = 0
+        
         def monitor_pktlist():
-            global last_processed_index
-
+            nonlocal last_processed_index
             while True:
                 current_len = len(pktlist)
                 if current_len > last_processed_index:
@@ -266,7 +236,10 @@ def main(p4info_path, bmv2_json_path):
                                 src_port = udp_layer.sport
                                 dst_port = udp_layer.dport
                                 
-                                five_tuple_list.add((src_ip, dst_ip, src_port, dst_port, protocol))
+                                if (src_ip, dst_ip, src_port, dst_port, protocol) in five_tuple_list:
+                                    continue
+                                else:
+                                    five_tuple_list.append((src_ip, dst_ip, src_port, dst_port, protocol))
                         else:
                             print("不是IP数据包")
 
@@ -276,6 +249,8 @@ def main(p4info_path, bmv2_json_path):
                     time.sleep(1)  # 每隔1秒检查一次 pktlist
         pktlist_thread = Thread(target=monitor_pktlist)
         pktlist_thread.start()
+
+        # 下发流表表项
 
             
             
