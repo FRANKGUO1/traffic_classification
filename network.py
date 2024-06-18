@@ -14,9 +14,12 @@ net.setP4SourceAll('edge_switch.p4')
 
 net.addHost('h1')
 net.addHost('h2')
+net.addHost('server')
+
 
 net.addLink('h1', 's1')
 net.addLink('h2', 's1')
+net.addLink('server', 's1')
 
 # Assignment strategy
 net.l3()

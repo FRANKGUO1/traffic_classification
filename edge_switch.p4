@@ -14,7 +14,7 @@ const bit<8>  IP_PROTO_ICMP = 8w1;
 
 #define MAX_HOPS 10
 #define MAX_PORTS 8
-//定义cpu端口号
+// 定义cpu端口号
 #define CPU_PORT 255
 
 
@@ -98,20 +98,6 @@ header icmp_h {
     bit<16>  hdr_checksum;
 }
 //--------------------------
-//SINET首部
-header sinet_h {
-    bit<4>   version;
-    bit<8>   slice_id;
-    bit<20>  flow_label;
-    bit<16>  payload_len;
-    bit<8>   src_id_len;
-    bit<8>   dst_id_len;
-    bit<32>  src_id;
-    bit<32>  dst_id;
-    bit<16>  protocol_id;
-    bit<8>   hop_limit;
-}
-//--------------------------
 //TCP首部
 header tcp_h {
     bit<16>  src_port;
@@ -133,14 +119,15 @@ header udp_h {
     bit<16>  hdr_length;
     bit<16>  checksum;
 }
-//---------------------------
-struct five_tuple_digest {
-    bit<32> srcIp;
-    bit<32> dstIp;
-    bit<16> srcPort;
-    bit<16> dstPort;
-    bit<8>  proto;
-}
+//--------------------------
+// @controller_header("packet_in")
+// header packet_in_t {
+//     bit<32> srcIp;
+//     bit<32> dstIp;
+//     bit<16> srcPort;
+//     bit<16> dstPort;
+//     bit<8>  proto;
+// }
 //--------------------------
 struct metadata {
     bit<8>   remaining1;
@@ -150,11 +137,11 @@ struct metadata {
     bit<9>   ingress_time;
     bit<16>  srcport;
     bit<16>  dstport;
-    five_tuple_digest five_tuple;
 }
 //--------------------------
 //完整首部
 struct headers {
+    //packet_in_t              packetin;
     ethernet_h               ethernet;
     arp_h                    arp;
     ipv4_h                   ipv4;
@@ -163,7 +150,6 @@ struct headers {
     probe_data_h[MAX_HOPS]   probe_data;
     ipv6_h                   ipv6;
     icmp_h                   icmp;
-    sinet_h                  sinet;
     tcp_h                    tcp;
     udp_h                    udp;
 }
@@ -180,7 +166,6 @@ parser c_parser(packet_in packet,
         packet.extract(hdr.ethernet);
         transition select(hdr.ethernet.ether_type) {
             TYPE_ARP: parse_arp;
-            TYPE_SINET: parse_sinet;
             TYPE_IPV4: parse_ipv4;
             TYPE_IPV6: parse_ipv6;
             TYPE_PROBE: parse_probe;
@@ -189,10 +174,6 @@ parser c_parser(packet_in packet,
     }
     state parse_arp {
         packet.extract(hdr.arp);
-        transition accept;
-    }
-    state parse_sinet {
-        packet.extract(hdr.sinet);
         transition accept;
     }
     state parse_ipv4 {
@@ -260,9 +241,9 @@ control c_ingress(inout headers hdr,
     action _drop() {
         mark_to_drop(standard_metadata);
     }
-    action ipv4_forward(bit<9> port) {
-        //hdr.ethernet.src_mac = hdr.ethernet.dst_mac;
-        //hdr.ethernet.dst_mac = dstAddr;
+    action ipv4_forward(bit<48> dstAddr, bit<9> port) {
+        hdr.ethernet.src_mac = hdr.ethernet.dst_mac;
+        hdr.ethernet.dst_mac = dstAddr;
         //hdr.ipv4.src_addr = src_addr;
         //hdr.ipv4.dst_addr = dst_addr;
         standard_metadata.egress_spec = port;
@@ -331,24 +312,36 @@ control c_ingress(inout headers hdr,
 
     apply { 
         if (hdr.ipv4.isValid()) {
-            ipv4_lpm.apply();
             // 这里要有一个处理逻辑，根据端口号来排除一些常见的协议
             if (hdr.tcp.isValid()) {
                 // 这里做判断，将一些包直接过滤掉
-                meta.five_tuple.srcPort = hdr.tcp.src_port;
-                meta.five_tuple.dstPort = hdr.tcp.dst_port;
+                meta.srcport = hdr.tcp.src_port;
+                meta.dstport = hdr.tcp.dst_port;
             }
             else if (hdr.udp.isValid()) {
-                meta.five_tuple.srcPort = hdr.udp.src_port;
-                meta.five_tuple.dstPort = hdr.udp.dst_port;
+                meta.srcport = hdr.udp.src_port;
+                meta.dstport = hdr.udp.dst_port;
             }
-            if (meta.five_tuple.srcPort != 0 && meta.five_tuple.dstPort != 0){
-                if (srcport_match.apply().miss && dstport_match.apply().miss) {                    
+            if (hdr.ipv4.protocol == 17 || hdr.ipv4.protocol == 6){
+                if (srcport_match.apply().miss && dstport_match.apply().miss) {
+                    // hdr.packetin.setValid();
+                    // hdr.packetin.setValid();
+                    // hdr.packetin.srcIp = hdr.ipv4.src_addr;
+                    // hdr.packetin.dstIp = hdr.ipv4.dst_addr;
+                    // hdr.packetin.srcPort = meta.srcport;
+                    // hdr.packetin.dstPort = meta.dstport;
+                    // hdr.packetin.proto = hdr.ipv4.protocol;      
                     clone(CloneType.I2E, 100);
-                    // digest<five_tuple_digest>(1, {hdr.ipv4.src_addr, hdr.ipv4.dst_addr, meta.five_tuple.srcPort, meta.five_tuple.dstPort, hdr.ipv4.protocol});      
-                    detect_flow.apply();
+                    // hdr.packetin.setValid();
+                    // digest<five_tuple_digest>(1, {hdr.ipv4.src_addr, hdr.ipv4.dst_addr, meta.five_tuple.srcPort, meta.five_tuple.dstPort, hdr.ipv4.protocol});
+
+                }
+                else {
+                    ipv4_lpm.apply(); 
                 }  
-            }  
+            }
+            detect_flow.apply();
+                       
         }      
         }
     }
@@ -358,19 +351,19 @@ control c_egress(inout headers hdr,
                  inout metadata meta, 
                  inout standard_metadata_t standard_metadata) {
     apply {
-        }
     }
-
+}
 //------------------------------------------------------------
 control c_compute_checksum(inout headers hdr,
                            inout metadata meta) {
     apply {
+        }
 
     }
-}
 //------------------------------------------------------------
 control c_deparser(packet_out packet, in headers hdr) {
     apply {
+        //packet.emit(hdr.packetin);
         packet.emit(hdr.ethernet);
         packet.emit(hdr.arp);
         packet.emit(hdr.ipv4);
@@ -379,7 +372,6 @@ control c_deparser(packet_out packet, in headers hdr) {
         packet.emit(hdr.probe_data);
         packet.emit(hdr.ipv6);
         packet.emit(hdr.icmp);
-        packet.emit(hdr.sinet);
         packet.emit(hdr.tcp);
         packet.emit(hdr.udp);
     }

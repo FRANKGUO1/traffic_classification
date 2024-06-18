@@ -10,8 +10,10 @@ import p4runtime_sh.shell as sh
 from threading import Thread
 from google.protobuf.json_format import MessageToDict
 import base64
+import time
 
-from scapy.all import sniff
+
+from scapy.all import *
 
 import argparse
 import sys
@@ -28,16 +30,11 @@ from p4.tmp import p4config_pb2
 from p4.v1 import p4runtime_pb2, p4runtime_pb2_grpc
 
 import grpc
+import socket
 
 
 
-parser = argparse.ArgumentParser()
-# parser.add_argument('--thrift-port', help='Thrift server port for table updates', type=int, action="store", default=9090)
-parser.add_argument(
-    "--p4-file", help="Path to P4 file", type=str, action="store", required=False
-)
 
-args = parser.parse_args()
 
 # 获取特征的列表
 packet_features = []
@@ -155,7 +152,7 @@ def main(p4info_path, bmv2_json_path):
     # digest_thread.start()  
     # DigestController("s1").run_digest_loop()
     
-    p4info_helper = helper.P4InfoHelper(p4info_path)
+    # p4info_helper = helper.P4InfoHelper(p4info_path)
 
     """
     
@@ -199,9 +196,11 @@ def main(p4info_path, bmv2_json_path):
         """
         te_ipv4_lpm = sh.TableEntry('ipv4_lpm')(action='ipv4_forward')
         te_ipv4_lpm.match['hdr.ipv4.dst_addr'] = '10.1.1.2'
+        te_ipv4_lpm.action['dstAddr'] = '00:00:0a:01:01:02'
         te_ipv4_lpm.action['port'] = '1'
         te_ipv4_lpm.match['hdr.ipv4.dst_addr'] = '10.1.2.2'
         te_ipv4_lpm.action['port'] = '2'
+        te_ipv4_lpm.action['dstAddr'] = '00:00:0a:01:02:02'
         te_ipv4_lpm.insert()
 
         ipv4_lpm_sessions = te_ipv4_lpm.read()
@@ -212,7 +211,7 @@ def main(p4info_path, bmv2_json_path):
 
         # 添加mirroring_add 指令
         te_clone = sh.CloneSessionEntry(100)
-        te_clone.add(255, 0)
+        te_clone.add(255)
         te_clone.insert()
 
         clone_sessions = te_clone.read()
@@ -222,38 +221,64 @@ def main(p4info_path, bmv2_json_path):
             print(session)
               
         packet_in = sh.PacketIn()
+        five_tuple_list = set()
         pktlist = []
-        sys.stdout.flush()  # 刷新输出，确保即时显示
-        pkt = packet_in.sniff(timeout=5)
-        for msg in pkt:
-            response_dict = MessageToDict(msg)
+        sys.stdout.flush()
+        
+        def packet_sniff():
+            while True:
+                pkt = packet_in.sniff(timeout=1)
+                for msg in pkt:
+                    # sys.stdout.flush()
+                    if msg not in pktlist:
+                        pktlist.append(msg)
+                # print(pktlist)
+        sniffer_thread = Thread(target=packet_sniff)
+        sniffer_thread.start()
 
-            metadata_values = [entry['value'] for entry in response_dict['packet']['metadata']]
 
-            # 解码 Base64 编码的值
-            decoded_metadata_values = [base64.b64decode(value) for value in metadata_values]
-            sys.stdout.flush() 
-            for idx, value in enumerate(decoded_metadata_values, start=1):
-                # 转换为整数
-                int_value = int.from_bytes(value, byteorder='big')
-                print(f"Metadata {idx} value (as integer):", int_value)
+        last_processed_index = 0
+        def monitor_pktlist():
+            global last_processed_index
+
+            while True:
+                current_len = len(pktlist)
+                if current_len > last_processed_index:
+                    for i in range(last_processed_index, current_len):
+                        pkt = pktlist[i]
+                        # 使用Scapy解析数据包
+                        response_dict = MessageToDict(pkt)
+                        decoded_metadata_values = base64.b64decode(response_dict['packet']['payload'])
+                        packet = Ether(decoded_metadata_values)
+
+                        # 检查是否是IP数据包
+                        if IP in packet:
+                            ip_layer = packet[IP]
+                            
+                            # 检查是否是UDP协议
+                            if UDP in ip_layer:
+                                udp_layer = ip_layer[UDP]
+                                
+                                # 提取五元组
+                                src_ip = ip_layer.src
+                                dst_ip = ip_layer.dst
+                                protocol = ip_layer.proto
+                                src_port = udp_layer.sport
+                                dst_port = udp_layer.dport
+                                
+                                five_tuple_list.add((src_ip, dst_ip, src_port, dst_port, protocol))
+                        else:
+                            print("不是IP数据包")
+
+                    last_processed_index = current_len
+                    print(five_tuple_list)
+        
+                    time.sleep(1)  # 每隔1秒检查一次 pktlist
+        pktlist_thread = Thread(target=monitor_pktlist)
+        pktlist_thread.start()
+
             
-        print(pktlist)
-        
-        
-        
-        """
-        while True:
-            packetin = s1.PacketIn()  # Packet in!
-            if packetin:
-                print("PACKET IN received")
-                print(packetin)
-        """
-        
-        
-        # 新方案，用packet io来实现，直接在流表项中添加mirror ID，然后用clone复制数据包并转发到cpu端口
-        # 额外：试试可不可以简化数据包，比如去除负载等等
-                       
+            
     except KeyboardInterrupt:
         print(" Shutting down.")
     except grpc.RpcError as e:
@@ -263,7 +288,11 @@ def main(p4info_path, bmv2_json_path):
 
     
 if __name__ == "__main__":
-    
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+    "--p4-file", help="Path to P4 file", type=str, action="store", required=False
+    )
+    args = parser.parse_args()
     p4_file = args.p4_file.split("/")[-1] # 路径的最后一个为文件名
     name = p4_file.split(".")[0]
     # os.system()是返回状态码，如果参数正确，则result为0
