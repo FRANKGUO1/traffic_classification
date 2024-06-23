@@ -1,11 +1,5 @@
-import nnpy
-import struct
-import ipaddress
 from p4utils.utils.helper import load_topo
-from p4utils.utils.sswitch_thrift_API import SimpleSwitchThriftAPI
-import subprocess 
 import os
-from datetime import datetime
 import p4runtime_sh.shell as sh 
 from threading import Thread
 from google.protobuf.json_format import MessageToDict
@@ -18,19 +12,12 @@ from scapy.all import *
 import argparse
 import sys
 import time
-import logging
-import google.protobuf.text_format
-from google.rpc import status_pb2, code_pb2
 
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "utils/"))
 from utils import bmv2, helper
-from utils.switch import ShutdownAllSwitchConnections
-
-from p4.tmp import p4config_pb2
-from p4.v1 import p4runtime_pb2, p4runtime_pb2_grpc
 
 import grpc
-import socket
+
 
 
 # 获取特征的列表
@@ -107,7 +94,6 @@ def monitor_five_tuples(sh):
         if current_length > last_checked_length:
             for i in range(last_checked_length, current_length):
                 # 下发check_flow流表
-                # te_check_flow = sh.TableEntry('check_flow')(action='NoAction')
                 te_check_flow.match['hdr.ipv4.src_addr'] = five_tuple_list[i][0]
                 te_check_flow.match['hdr.ipv4.dst_addr'] = five_tuple_list[i][1]
                 te_check_flow.match['meta.srcport'] = str(five_tuple_list[i][2])
@@ -116,7 +102,6 @@ def monitor_five_tuples(sh):
                 te_check_flow.insert()
 
                 # 开启线程监控five_tuple_list,获取五元组并下发流表
-                # te_detect_flow = sh.TableEntry('detect_flow')(action='record_flow')
                 te_detect_flow.match['hdr.ipv4.src_addr'] = five_tuple_list[i][0]
                 te_detect_flow.match['hdr.ipv4.dst_addr'] = five_tuple_list[i][1]
                 te_detect_flow.match['meta.srcport'] = str(five_tuple_list[i][2])
@@ -125,16 +110,11 @@ def monitor_five_tuples(sh):
 
                 te_detect_flow.action['index'] = str(i)
                 te_detect_flow.insert()
-
-                # check_flow_sessions = te_check_flow.read()
-                # for session in check_flow_sessions:
-                #    print(session)
-    
+   
             last_checked_length = current_length
 
 
 def monitor_flow(sh):
-    # te_flow = sh.DirectCounterEntry('packets_bytes_counter')
     te_flow = sh.CounterEntry('packets_bytes_counter')
     while True:    
         sessions = te_flow.read()
@@ -144,21 +124,25 @@ def monitor_flow(sh):
             print("字节数：", session.byte_count)
             if session.index < len(five_tuple_list):
                 if five_tuple_list[session.index] in flow_dict:
-                    flow_dict[five_tuple_list[session.index]].append((session.packet_count, session.byte_count))
+                    if len(flow_dict[five_tuple_list[session.index]]) <= 5:
+                        flow_dict[five_tuple_list[session.index]].append((session.packet_count, session.byte_count))
                 else:
                     flow_dict[five_tuple_list[session.index]] = [(session.packet_count, session.byte_count)]
-            # flow_list.append((session.index, session.byte_count, session.packet_count))
             print()
         time.sleep(0.5)
 
 
 # 处理大流还是小流
 def print_flow_dict():
+    """
+    这里获取特征
+    forward_packets,forward_bytes, total_packets, total_bytes, backward_packets, backward_bytes,
+    forward_packets_per_sec, backward_packets_per_sec, forward_bytes_per_sec, backward_bytes_per_sec,
+    forward_avg_packet_length_per_flow, back_avg_packet_length_per_flow
+    """
     while True:
-        if len(flow_dict.values()) % 3 == 0:
+        if flow_dict:
             print(flow_dict)
-
-
         time.sleep(2)
 
 
@@ -177,7 +161,6 @@ def main(p4info_path, bmv2_json_path):
         te.action['<name>'] = '<value>'
         te.insert()
         """
-
         # 下发ipv4_lpm表项
         te_ipv4_lpm = sh.TableEntry('ipv4_lpm')(action='ipv4_forward')
         te_ipv4_lpm.match['hdr.ipv4.dst_addr'] = '10.1.1.2'
@@ -191,7 +174,6 @@ def main(p4info_path, bmv2_json_path):
         ipv4_lpm_sessions = te_ipv4_lpm.read()
         for session in ipv4_lpm_sessions:
             print(session)
-
 
         # 添加mirroring_add 指令
         te_clone = sh.CloneSessionEntry(100)
@@ -241,9 +223,7 @@ def main(p4info_path, bmv2_json_path):
     except grpc.RpcError as e:
         printGrpcError(e)
 
-    # ShutdownAllSwitchConnections()
-
-    
+   
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
