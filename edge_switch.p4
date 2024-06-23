@@ -120,15 +120,6 @@ header udp_h {
     bit<16>  checksum;
 }
 //--------------------------
-// @controller_header("packet_in")
-// header packet_in_t {
-//     bit<32> srcIp;
-//     bit<32> dstIp;
-//     bit<16> srcPort;
-//     bit<16> dstPort;
-//     bit<8>  proto;
-// }
-//--------------------------
 struct metadata {
     bit<8>   remaining1;
     bit<8>   remaining2;
@@ -141,7 +132,6 @@ struct metadata {
 //--------------------------
 //完整首部
 struct headers {
-    //packet_in_t              packetin;
     ethernet_h               ethernet;
     arp_h                    arp;
     ipv4_h                   ipv4;
@@ -238,6 +228,7 @@ control c_verify_checksum(inout headers hdr,
 control c_ingress(inout headers hdr, 
                   inout metadata meta, 
                   inout standard_metadata_t standard_metadata) {
+
     action _drop() {
         mark_to_drop(standard_metadata);
     }
@@ -280,20 +271,13 @@ control c_ingress(inout headers hdr,
     }
     
     // 根据五元组来确定流，从而记录流特征,还得用标号标记每个流对应的寄存器索引
-    register<bit<32>>(MAX_PORTS) register_packet_count;
-    register<bit<32>>(MAX_PORTS) register_len_count;
+    // direct_counter(CounterType.packets_and_bytes) packets_bytes_counter;
+    counter(4, CounterType.packets_and_bytes) packets_bytes_counter;
     action record_flow(bit<32> index) {
         // 记录流包数
-        bit<32> packet_count = 0;
-        register_packet_count.read(packet_count, index);
-        packet_count = packet_count + 1;
-        register_packet_count.write(index, packet_count);
-
         // 记录流字节数
-        bit<32> len_count = 0;
-        register_len_count.read(len_count, index);
-        len_count = len_count + standard_metadata.packet_length;
-        register_len_count.write(index, len_count);
+        packets_bytes_counter.count((bit<32>) index);
+        
     }
 
     table detect_flow {
@@ -307,8 +291,27 @@ control c_ingress(inout headers hdr,
 
         actions = {
             record_flow;
-        }
+        }  
+        size = 1024;
+        // counters = packets_bytes_counter;
     }
+
+    
+    table check_flow {
+        key = {
+            hdr.ipv4.src_addr: exact;
+            hdr.ipv4.dst_addr: exact;
+            meta.srcport: exact;
+            meta.dstport: exact;
+            hdr.ipv4.protocol: exact;
+        }
+
+        actions = {
+            NoAction;
+        }
+        default_action = NoAction;
+    }
+
 
     apply { 
         if (hdr.ipv4.isValid()) {
@@ -323,25 +326,20 @@ control c_ingress(inout headers hdr,
                 meta.dstport = hdr.udp.dst_port;
             }
             if (hdr.ipv4.protocol == 17 || hdr.ipv4.protocol == 6){
-                if (srcport_match.apply().miss && dstport_match.apply().miss) {
-                    // hdr.packetin.setValid();
-                    // hdr.packetin.setValid();
-                    // hdr.packetin.srcIp = hdr.ipv4.src_addr;
-                    // hdr.packetin.dstIp = hdr.ipv4.dst_addr;
-                    // hdr.packetin.srcPort = meta.srcport;
-                    // hdr.packetin.dstPort = meta.dstport;
-                    // hdr.packetin.proto = hdr.ipv4.protocol;      
-                    clone(CloneType.I2E, 100);
-                    // hdr.packetin.setValid();
-                    // digest<five_tuple_digest>(1, {hdr.ipv4.src_addr, hdr.ipv4.dst_addr, meta.five_tuple.srcPort, meta.five_tuple.dstPort, hdr.ipv4.protocol});
-
+                //探测流是否需要记录
+                if (check_flow.apply().hit) {
+                    //若需要记录，则记录相关的流特征
+                    detect_flow.apply();
                 }
                 else {
-                    ipv4_lpm.apply(); 
-                }  
+                    //若没有，说明该流已上传过控制器或未上传过控制器，则需要判断是否需要clone
+                    if (srcport_match.apply().miss && dstport_match.apply().miss) {    
+                        clone(CloneType.I2E, 100);
+                    }    
+                }
+                          
             }
-            detect_flow.apply();
-                       
+            ipv4_lpm.apply();                        
         }      
         }
     }
