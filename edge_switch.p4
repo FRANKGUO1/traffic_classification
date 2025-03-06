@@ -14,7 +14,7 @@ const bit<8>  IP_PROTO_ICMP = 8w1;
 
 #define MAX_HOPS 10
 #define MAX_PORTS 8
-// 定义cpu端口号
+//定义cpu端口号
 #define CPU_PORT 255
 
 
@@ -58,38 +58,7 @@ header ipv4_h {
     bit<32>  dst_addr;
 }
 //--------------------------
-//IPv6首部
-header ipv6_h {
-    bit<4>    version;
-    bit<8>    traffic_class;
-    bit<20>   flow_label;
-    bit<16>   payload_len;
-    bit<8>    next_header;
-    bit<8>    hop_limit;
-    bit<128>  src_addr;
-    bit<128>  dst_addr;
-}
-//--------------------------
-//INT首部
-header probe_h {
-    bit<8>    hop_cnt; // probe_fwd字段个数
-    bit<8>    data_cnt; // probe_data字段个数
-}
-//--------------------------
-header probe_fwd_h {
-    bit<8>   swid; // 交换机标识
-}
-//--------------------------
-header probe_data_h {
-    bit<8>    swid; // 交换机标识
-    bit<8>    port; // 端口号
-    bit<32>   byte_cnt; // 流量
-    bit<32>   pckcont; // 入口数据包个数
-    bit<32>   enpckcont; // 出口数据包个数
-    bit<48>   last_time; // 上一个INT包到达时间
-    bit<48>   cur_time; // 当前INT包到达时间
-    bit<32>   qdepth; // 队列长度
-}
+
 //--------------------------
 // ICMP首部
 header icmp_h {
@@ -98,6 +67,7 @@ header icmp_h {
     bit<16>  hdr_checksum;
 }
 //--------------------------
+
 //TCP首部
 header tcp_h {
     bit<16>  src_port;
@@ -119,15 +89,25 @@ header udp_h {
     bit<16>  hdr_length;
     bit<16>  checksum;
 }
+//---------------------------
+// 用三元组标记一个流，目的Ip，目的端口，协议号即可
+struct five_tuple_digest {
+    // bit<32> srcIp;
+    bit<32> dstIp;
+    // bit<16> srcPort;
+    bit<16> dstPort;
+    bit<8>  proto;
+    // bit<48> ingress_cur_time;  
+    // bit<48> egress_cur_time;  
+    // bit<32>   ingress_byte_cnt;
+    bit<32>   egress_byte_cnt;
+}
 //--------------------------
 struct metadata {
-    bit<8>   remaining1;
-    bit<8>   remaining2;
-    bit<8>   sswid;
-    bit<32>  pktcont2;
-    bit<9>   ingress_time;
     bit<16>  srcport;
     bit<16>  dstport;
+
+    five_tuple_digest five_tuple;
 }
 //--------------------------
 //完整首部
@@ -135,10 +115,6 @@ struct headers {
     ethernet_h               ethernet;
     arp_h                    arp;
     ipv4_h                   ipv4;
-    probe_h                  probe;
-    probe_fwd_h[MAX_HOPS]    probe_fwd;
-    probe_data_h[MAX_HOPS]   probe_data;
-    ipv6_h                   ipv6;
     icmp_h                   icmp;
     tcp_h                    tcp;
     udp_h                    udp;
@@ -157,8 +133,6 @@ parser c_parser(packet_in packet,
         transition select(hdr.ethernet.ether_type) {
             TYPE_ARP: parse_arp;
             TYPE_IPV4: parse_ipv4;
-            TYPE_IPV6: parse_ipv6;
-            TYPE_PROBE: parse_probe;
             default: accept;
         }
     }
@@ -166,6 +140,7 @@ parser c_parser(packet_in packet,
         packet.extract(hdr.arp);
         transition accept;
     }
+
     state parse_ipv4 {
         packet.extract(hdr.ipv4);
         transition select(hdr.ipv4.protocol) {
@@ -176,44 +151,15 @@ parser c_parser(packet_in packet,
     }
     state parse_tcp {
        packet.extract(hdr.tcp);
+       meta.dstport = hdr.tcp.dst_port;
+       meta.srcport = hdr.tcp.src_port;
        transition accept;
     }
     state parse_udp {
        packet.extract(hdr.udp);
+       meta.dstport = hdr.udp.dst_port;
+       meta.srcport = hdr.udp.src_port;
        transition accept;
-    }
-    state parse_icmp {
-        packet.extract(hdr.icmp);
-        transition accept;
-    }
-    state parse_ipv6 {
-        packet.extract(hdr.ipv6);
-        transition accept;
-    }
-    state parse_probe {
-        packet.extract(hdr.probe);
-        meta.remaining1 = hdr.probe.hop_cnt;
-        meta.remaining2 = hdr.probe.data_cnt;
-        transition select(hdr.probe.hop_cnt) {
-            0: parse_probe_data;
-            default: parse_probe_fwd;
-        }
-    }
-    state parse_probe_fwd {
-        packet.extract(hdr.probe_fwd.next);
-        meta.remaining1 = meta.remaining1 - 1;
-        transition select(meta.remaining1) {
-            0: parse_probe_data;
-            default: parse_probe_fwd;
-        }
-    }
-    state parse_probe_data {
-        packet.extract(hdr.probe_data.next);
-        meta.remaining2 = meta.remaining2 - 1;
-        transition select(meta.remaining2) {
-            0: accept;
-            default: parse_probe_data;
-        }
     }
 }
 
@@ -228,13 +174,12 @@ control c_verify_checksum(inout headers hdr,
 control c_ingress(inout headers hdr, 
                   inout metadata meta, 
                   inout standard_metadata_t standard_metadata) {
-
     action _drop() {
         mark_to_drop(standard_metadata);
     }
-    action ipv4_forward(bit<48> dstAddr, bit<9> port) {
-        hdr.ethernet.src_mac = hdr.ethernet.dst_mac;
-        hdr.ethernet.dst_mac = dstAddr;
+    action ipv4_forward(bit<9> port) {
+        //hdr.ethernet.src_mac = hdr.ethernet.dst_mac;
+        //hdr.ethernet.dst_mac = dstAddr;
         //hdr.ipv4.src_addr = src_addr;
         //hdr.ipv4.dst_addr = dst_addr;
         standard_metadata.egress_spec = port;
@@ -269,15 +214,40 @@ control c_ingress(inout headers hdr,
             NoAction;
         }
     }
+
+    action send_digest() {
+        digest<five_tuple_digest>(1, {hdr.ipv4.dst_addr, meta.dstport, hdr.ipv4.protocol, standard_metadata.packet_length});
+        // digest(1, {hdr.ipv4.dst_addr, meta.dstport, hdr.ipv4.protocol, standard_metadata.egress_global_timestamp, standard_metadata.packet_length});
+    }
+    // Table
+    table digest_table {
+        key = {
+            // hdr.ipv4.dst_addr: lpm;
+            meta.dstport: exact;
+            // hdr.ipv4.protocol: exact;
+            }
+        actions = {
+            send_digest;
+            }
+        // no need to set table entry from control plane to send digest
+        // const default_action = send_digest;
+        }
     
     // 根据五元组来确定流，从而记录流特征,还得用标号标记每个流对应的寄存器索引
-    // direct_counter(CounterType.packets_and_bytes) packets_bytes_counter;
-    counter(4, CounterType.packets_and_bytes) packets_bytes_counter;
+    register<bit<32>>(MAX_PORTS) register_packet_count;
+    register<bit<32>>(MAX_PORTS) register_len_count;
     action record_flow(bit<32> index) {
         // 记录流包数
+        bit<32> packet_count = 0;
+        register_packet_count.read(packet_count, index);
+        packet_count = packet_count + 1;
+        register_packet_count.write(index, packet_count);
+
         // 记录流字节数
-        packets_bytes_counter.count((bit<32>) index);
-        
+        bit<32> len_count = 0;
+        register_len_count.read(len_count, index);
+        len_count = len_count + standard_metadata.packet_length;
+        register_len_count.write(index, len_count);
     }
 
     table detect_flow {
@@ -288,58 +258,21 @@ control c_ingress(inout headers hdr,
             meta.dstport: exact;
             hdr.ipv4.protocol: exact;
         }
-
         actions = {
             record_flow;
-        }  
-        size = 1024;
-        // counters = packets_bytes_counter;
-    }
-
-    
-    table check_flow {
-        key = {
-            hdr.ipv4.src_addr: exact;
-            hdr.ipv4.dst_addr: exact;
-            meta.srcport: exact;
-            meta.dstport: exact;
-            hdr.ipv4.protocol: exact;
         }
-
-        actions = {
-            NoAction;
-        }
-        default_action = NoAction;
     }
-
 
     apply { 
         if (hdr.ipv4.isValid()) {
+            digest_table.apply();
+            ipv4_lpm.apply();
             // 这里要有一个处理逻辑，根据端口号来排除一些常见的协议
-            if (hdr.tcp.isValid()) {
-                // 这里做判断，将一些包直接过滤掉
-                meta.srcport = hdr.tcp.src_port;
-                meta.dstport = hdr.tcp.dst_port;
-            }
-            else if (hdr.udp.isValid()) {
-                meta.srcport = hdr.udp.src_port;
-                meta.dstport = hdr.udp.dst_port;
-            }
-            if (hdr.ipv4.protocol == 17 || hdr.ipv4.protocol == 6){
-                //探测流是否需要记录
-                if (check_flow.apply().hit) {
-                    //若需要记录，则记录相关的流特征
-                    detect_flow.apply();
-                }
-                else {
-                    //若没有，说明该流已上传过控制器或未上传过控制器，则需要判断是否需要clone
-                    if (srcport_match.apply().miss && dstport_match.apply().miss) {    
-                        clone(CloneType.I2E, 100);
-                    }    
-                }
-                          
-            }
-            ipv4_lpm.apply();                        
+            if (srcport_match.apply().miss && dstport_match.apply().miss) {                    
+                clone(CloneType.I2E, 100);
+                // digest<five_tuple_digest>(1, {hdr.ipv4.src_addr, hdr.ipv4.dst_addr, meta.five_tuple.srcPort, meta.five_tuple.dstPort, hdr.ipv4.protocol});      
+                detect_flow.apply();
+            }  
         }      
         }
     }
@@ -348,27 +281,27 @@ control c_ingress(inout headers hdr,
 control c_egress(inout headers hdr, 
                  inout metadata meta, 
                  inout standard_metadata_t standard_metadata) {
+
     apply {
+        // 发送digest给控制平面
+        // digest_table.apply();
+        //  digest<five_tuple_digest>(1, {hdr.ipv4.dst_addr, meta.dstport, hdr.ipv4.protocol, standard_metadata.egress_global_timestamp, standard_metadata.packet_length});
+        }
     }
-}
+
 //------------------------------------------------------------
 control c_compute_checksum(inout headers hdr,
                            inout metadata meta) {
     apply {
-        }
 
     }
+}
 //------------------------------------------------------------
 control c_deparser(packet_out packet, in headers hdr) {
     apply {
-        //packet.emit(hdr.packetin);
         packet.emit(hdr.ethernet);
         packet.emit(hdr.arp);
         packet.emit(hdr.ipv4);
-        packet.emit(hdr.probe);
-        packet.emit(hdr.probe_fwd);
-        packet.emit(hdr.probe_data);
-        packet.emit(hdr.ipv6);
         packet.emit(hdr.icmp);
         packet.emit(hdr.tcp);
         packet.emit(hdr.udp);
