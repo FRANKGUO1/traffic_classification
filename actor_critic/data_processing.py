@@ -52,6 +52,8 @@ def process_to_image(group, t_start):
     
     # 创建 (148, 148) 图像
     image = np.zeros((target_size, target_size), dtype=np.float32)
+    # image = np.zeros((target_size, target_size), dtype=np.float32)  # target_size = 148
+    print(image.shape)
     for interval, size in zip(group['Interval'], normalized_sizes):
         if interval < num_intervals:  # 防止越界
             target_interval = int(interval * (target_size / num_intervals))
@@ -63,12 +65,14 @@ def process_to_image(group, t_start):
 class_mapping = {
     'video': 0,
     'voip': 1,
-    'ftps': 2,
-    'audio': 3,
-    'chat': 4
+    'audio': 1, # 数据中的audio就是voip，所以类别不做区分
+    'ftp': 2,
+    'sftp': 2,
+    'chat': 3
 }
 
-file_path = '/home/sinet/gzc/traffic_classification/actor_critic/data/facebook_audio.csv'
+file_path = '/home/sinet/gzc/traffic_classification/CNN/data/youtube_video.csv'
+min_points = 50  # 最小点数阈值
 data_fliename = file_path.split('/')[-1].split('.')[0]  # 从文件路径中提取应用类别
 class_name = data_fliename.split('_')[-1]
 print(class_name, class_mapping[class_name])
@@ -87,8 +91,8 @@ window_length = 15  # 15秒窗口
 step_size = 5  # 滑动步长5秒
 num_intervals = 300  # 15秒分为300个区间
 interval_length = window_length / num_intervals  # 每个区间0.05秒
-min_points = 500  # 最小点数阈值
-target_size = 148  # 模型输入尺寸 (148, 148)
+
+target_size = 150  # 模型输入尺寸 (150, 150)
 
 # 处理每个流并保存数据
 output_data = []  # 存储所有符合条件的图像数据
@@ -123,6 +127,6 @@ for name, group in flows:
         })
 
 # 将数据保存到文件
-output_file = f'{data_fliename}_data.pt'
+output_file = f'/home/sinet/gzc/traffic_classification/CNN/pt_data/{data_fliename}_data.pt'
 torch.save(output_data, output_file)
 print(f"数据已保存到 {output_file}，共 {len(output_data)} 个样本")

@@ -26,7 +26,7 @@ def merge_and_shuffle_pt_files(directory, output_file='merged_data.pt'):
     merged_data = []
     for pt_file in pt_files:
         file_path = os.path.join(directory, pt_file)
-        data = torch.load(file_path)
+        data = torch.load(file_path, weights_only=False) 
         print(f"加载 {file_path}，包含 {len(data)} 个样本")
         merged_data.extend(data)
     
@@ -40,9 +40,8 @@ def merge_and_shuffle_pt_files(directory, output_file='merged_data.pt'):
 
 # 示例使用
 if __name__ == "__main__":
-    # 指定包含 .pt 文件的目录
-    input_directory = './data'  # 请替换为你的实际目录路径
-    output_filename = 'merged_shuffled_data.pt'
+    input_directory = '/home/sinet/gzc/traffic_classification/CNN/pt_data'  # 请替换为你的实际目录路径
+    output_filename = 'merged_data.pt'
     
     try:
         merge_and_shuffle_pt_files(input_directory, output_filename)

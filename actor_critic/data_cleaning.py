@@ -77,8 +77,6 @@ def analyze_raw_ip_pcap(pcap_file, target_ip, source_port=None, protocol='tcp', 
                     
                     # 提取五元组
                     five_tuple = (
-                        # socket.inet_ntoa(ip.src) if is_ipv4 else socket.inet_ntop(socket.AF_INET6, ip.src),
-                        # socket.inet_ntoa(ip.dst) if is_ipv4 else socket.inet_ntop(socket.AF_INET6, ip.dst),
                         socket.inet_ntoa(ip.src),  # 源IP
                         socket.inet_ntoa(ip.dst),  # 目的IP
                         trans.sport,              # 源端口
@@ -129,16 +127,13 @@ def analyze_raw_ip_pcap(pcap_file, target_ip, source_port=None, protocol='tcp', 
                 'Timestamp': info['timestamp']
             })
     
-    # 打印结果
-    
     print(f"\n分析完成！匹配的数据包数量: {packet_count}")
-    # print(f"IPv4数据包数: {ip_packets}")
     print(f"处理耗时: {process_time:.2f} 秒")
     print(f"数据已写入文件: {csv_filename}")
     
     # 打印前5个匹配数据包
     print("\n前5个匹配数据包的信息:")
-    for info in packet_info[:5]:
+    for info in packet_info[:3]:
         print(f"五元组: {info['five_tuple']}")
         print(f"包大小: {info['size']} bytes")
         print(f"时间戳: {info['timestamp']}")
@@ -149,12 +144,12 @@ def analyze_raw_ip_pcap(pcap_file, target_ip, source_port=None, protocol='tcp', 
 # 使用示例
 if __name__ == "__main__":
     # 参数设置
-    pcap_file_path = '/home/sinet/gzc/traffic_classification/dataset/VPN-PCAPS-01/vpn_facebook_chat1b.pcap'   # pcap文件路径
-    target_ip_addr = "10.8.8.130"     # 替换为目标IP
+    pcap_file_path = '/home/sinet/gzc/traffic_classification/dataset/NonVPN-PCAPs-01/facebook_audio2a.pcap'   # pcap文件路径
+    target_ip_addr = "131.202.240.150"     # 替换为目标IP
     source_port_num = None          # 指定源端口号（可选，设为None则不过滤）
-    protocol_type = "tcp"              # 可改为"udp"
-    application_name = "facebook"       # 自定义应用名
-    data_type_name = "chat"         # 自定义类型名
+    protocol_type = "udp"              # 可改为"udp"
+    application_name = "novpnfacebook"       # 自定义应用名
+    data_type_name = "audio"         # 自定义类型名
     
     # 执行分析
     results = analyze_raw_ip_pcap(
