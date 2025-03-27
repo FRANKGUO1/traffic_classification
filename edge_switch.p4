@@ -91,23 +91,19 @@ header udp_h {
 }
 //---------------------------
 // 用三元组标记一个流，目的Ip，目的端口，协议号即可
-struct five_tuple_digest {
-    // bit<32> srcIp;
+struct digest_message {
+    bit<32> srcIp;
     bit<32> dstIp;
-    // bit<16> srcPort;
+    bit<16> srcPort;
     bit<16> dstPort;
     bit<8>  proto;
-    // bit<48> ingress_cur_time;  
-    // bit<48> egress_cur_time;  
-    // bit<32>   ingress_byte_cnt;
-    bit<32>   egress_byte_cnt;
+    bit<48> arriveTime;  
 }
 //--------------------------
 struct metadata {
-    bit<16>  srcport;
-    bit<16>  dstport;
-
-    five_tuple_digest five_tuple;
+    bit<16>  srcPort;
+    bit<16>  dstPort;
+    digest_message dm;
 }
 //--------------------------
 //完整首部
@@ -151,14 +147,14 @@ parser c_parser(packet_in packet,
     }
     state parse_tcp {
        packet.extract(hdr.tcp);
-       meta.dstport = hdr.tcp.dst_port;
-       meta.srcport = hdr.tcp.src_port;
+       meta.dm.dstPort = hdr.tcp.dst_port;
+       meta.dm.srcPort = hdr.tcp.src_port;
        transition accept;
     }
     state parse_udp {
        packet.extract(hdr.udp);
-       meta.dstport = hdr.udp.dst_port;
-       meta.srcport = hdr.udp.src_port;
+       meta.dm.dstPort = hdr.udp.dst_port;
+       meta.dm.srcPort = hdr.udp.src_port;
        transition accept;
     }
 }
@@ -177,12 +173,16 @@ control c_ingress(inout headers hdr,
     action _drop() {
         mark_to_drop(standard_metadata);
     }
-    action ipv4_forward(bit<9> port) {
-        //hdr.ethernet.src_mac = hdr.ethernet.dst_mac;
-        //hdr.ethernet.dst_mac = dstAddr;
-        //hdr.ipv4.src_addr = src_addr;
-        //hdr.ipv4.dst_addr = dst_addr;
+    action ipv4_forward(bit<48> dstAddr, bit<9> port) {
+
+        hdr.ethernet.src_mac = hdr.ethernet.dst_mac;
+        hdr.ethernet.dst_mac = dstAddr;
         standard_metadata.egress_spec = port;
+        meta.dm.srcIp = hdr.ipv4.src_addr;
+        meta.dm.dstIp = hdr.ipv4.dst_addr;
+        meta.dm.proto = hdr.ipv4.protocol;
+        meta.dm.arriveTime = standard_metadata.ingress_global_timestamp;
+        digest(1, meta.dm);
     }
 
     table ipv4_lpm {
@@ -197,45 +197,45 @@ control c_ingress(inout headers hdr,
         default_action = _drop();
     }
 
-    table srcport_match {
-        key = {
-            meta.srcport: exact;
-        }
-        actions = {
-            NoAction;
-        }
-    }
+    // table srcport_match {
+    //     key = {
+    //         meta.srcPort: exact;
+    //     }
+    //     actions = {
+    //         NoAction;
+    //     }
+    // }
 
-    table dstport_match {
-        key = {
-            meta.dstport: exact;
-        }
-        actions = {
-            NoAction;
-        }
-    }
+    // table dstport_match {
+    //     key = {
+    //         meta.dstPort: exact;
+    //     }
+    //     actions = {
+    //         NoAction;
+    //     }
+    // }
 
     action send_digest() {
-        digest<five_tuple_digest>(1, {hdr.ipv4.dst_addr, meta.dstport, hdr.ipv4.protocol, standard_metadata.packet_length});
-        // digest(1, {hdr.ipv4.dst_addr, meta.dstport, hdr.ipv4.protocol, standard_metadata.egress_global_timestamp, standard_metadata.packet_length});
+        // digest<five_tuple_digest>(1, {hdr.ipv4.dst_addr, meta.dstport, hdr.ipv4.protocol, standard_metadata.packet_length});
+        digest(1, {hdr.ipv4.src_addr, hdr.ipv4.dst_addr, meta.srcPort, meta.dstPort, hdr.ipv4.protocol, standard_metadata.egress_global_timestamp, standard_metadata.packet_length});
     }
     // Table
-    table digest_table {
-        key = {
-            // hdr.ipv4.dst_addr: lpm;
-            meta.dstport: exact;
-            // hdr.ipv4.protocol: exact;
-            }
-        actions = {
-            send_digest;
-            }
-        // no need to set table entry from control plane to send digest
-        // const default_action = send_digest;
-        }
+    // table digest_table {
+    //     key = {
+    //         // hdr.ipv4.dst_addr: lpm;
+    //         meta.dstPort: exact;
+    //         // hdr.ipv4.protocol: exact;
+    //         }
+    //     actions = {
+    //         send_digest;
+    //         }
+    //     // no need to set table entry from control plane to send digest
+    //     // const default_action = send_digest;
+    //     }
     
     // 根据五元组来确定流，从而记录流特征,还得用标号标记每个流对应的寄存器索引
-    register<bit<32>>(MAX_PORTS) register_packet_count;
-    register<bit<32>>(MAX_PORTS) register_len_count;
+    // register<bit<32>>(MAX_PORTS) register_packet_count;
+    // register<bit<32>>(MAX_PORTS) register_len_count;
     action record_flow(bit<32> index) {
         // 记录流包数
         bit<32> packet_count = 0;
@@ -250,29 +250,29 @@ control c_ingress(inout headers hdr,
         register_len_count.write(index, len_count);
     }
 
-    table detect_flow {
-        key = {
-            hdr.ipv4.src_addr: exact;
-            hdr.ipv4.dst_addr: exact;
-            meta.srcport: exact;
-            meta.dstport: exact;
-            hdr.ipv4.protocol: exact;
-        }
-        actions = {
-            record_flow;
-        }
-    }
+    // table detect_flow {
+    //     key = {
+    //         hdr.ipv4.src_addr: exact;
+    //         hdr.ipv4.dst_addr: exact;
+    //         meta.srcPort: exact;
+    //         meta.dstPort: exact;
+    //         hdr.ipv4.protocol: exact;
+    //     }
+    //     actions = {
+    //         record_flow;
+    //     }
+    // }
 
     apply { 
         if (hdr.ipv4.isValid()) {
-            digest_table.apply();
+            // digest_table.apply();
             ipv4_lpm.apply();
             // 这里要有一个处理逻辑，根据端口号来排除一些常见的协议
-            if (srcport_match.apply().miss && dstport_match.apply().miss) {                    
-                clone(CloneType.I2E, 100);
-                // digest<five_tuple_digest>(1, {hdr.ipv4.src_addr, hdr.ipv4.dst_addr, meta.five_tuple.srcPort, meta.five_tuple.dstPort, hdr.ipv4.protocol});      
-                detect_flow.apply();
-            }  
+            // if (srcport_match.apply().miss && dstport_match.apply().miss) {                    
+            //     clone(CloneType.I2E, 100);
+            //     // digest<five_tuple_digest>(1, {hdr.ipv4.src_addr, hdr.ipv4.dst_addr, meta.five_tuple.srcPort, meta.five_tuple.dstPort, hdr.ipv4.protocol});      
+            //     detect_flow.apply();
+            // }  
         }      
         }
     }
